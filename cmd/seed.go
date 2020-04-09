@@ -22,6 +22,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/gocarina/gocsv"
 	"github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -91,9 +92,107 @@ var seedCmd = &cobra.Command{
 		fmt.Println(databaseURL + " " + csvPath + " " + tableName)
 
 		setupDatabaseConnection(databaseURL)
+
+		createTable(db, tableName)
+
+		CSVReader(csvPath)
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(seedCmd)
+}
+
+func CSVReader(csvPath string) {
+	clientsFile, err := os.OpenFile(csvPath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+	defer clientsFile.Close()
+
+	csvData := []*CSVData{}
+
+	if err := gocsv.UnmarshalFile(clientsFile, &csvData); err != nil {
+		panic(err)
+	}
+	for _, client := range csvData {
+		fmt.Println("____________", client.SN)
+		insertIntoTable(db, client)
+	}
+
+	if _, err := clientsFile.Seek(0, 0); err != nil { // Go to the start of the file
+		panic(err)
+	}
+}
+
+func createTable(db *sql.DB, tableName string) {
+	var query = fmt.Sprintf(`
+        CREATE TABLE IF NOT EXISTS "%s" (
+            "SN" INTEGER NOT NULL,
+            "ID" INTEGER NOT NULL,
+            "Case Number" CHARACTER VARYING,
+            "Date" TIMESTAMP WITHOUT TIME ZONE,
+            "Block" CHARACTER VARYING NOT NULL,
+            "IUCR" CHARACTER VARYING NOT NULL,
+            "Primary Type" CHARACTER VARYING NOT NULL,
+            "Description" CHARACTER VARYING NOT NULL,
+            "Location Description" CHARACTER VARYING,
+            "Arrest" BOOLEAN NOT NULL,
+            "Domestic" BOOLEAN NOT NULL,
+            "Beat" INTEGER NOT NULL,
+            "District" INTEGER,
+            "Ward" INTEGER,
+            "Community Area" INTEGER,
+            "FBI Code" CHARACTER VARYING NOT NULL,
+            "X Coordinate" INTEGER,
+            "Y Coordinate" INTEGER,
+            "Year" INTEGER NOT NULL,
+            "Updated On" timestamp without time zone,
+            "Latitude" FLOAT,
+            "Longitude" FLOAT,
+            "Location" CHARACTER VARYING
+        )
+    `, tableName)
+
+	_, err := db.Query(query)
+	if err != nil {
+		panic(err)
+	}
+
+	return
+}
+
+func insertIntoTable(db *sql.DB, data *CSVData) {
+	query := `
+		INSERT into "crimes.all" (
+            "SN", "ID", "Case Number", "Date", "Block", "IUCR", "Primary Type", "Description",
+            "Location Description", "Arrest", "Domestic", "Beat", "District", "Ward", "Community Area",
+            "FBI Code", "X Coordinate", "Y Coordinate", "Year", "Updated On", "Latitude",
+            "Longitude", "Location"
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+            $17, $18, $19, $20, $21, $22, $23
+        )
+        RETURNING *;
+    `
+
+	var ScanClient ScanClient
+
+	err := db.QueryRow(
+		query,
+		data.SN, data.ID, data.CaseNumber, data.Date.Time, data.Block, data.IUCR, data.PrimaryType,
+		data.Description, data.LocationDescription, data.Arrest, data.Domestic, data.Beat, data.District,
+		data.Ward, data.CommunityArea, data.FBICode, data.XCoordinate, data.YCoordinate,
+		data.Year, data.UpdatedOn.Time, data.Latitude, data.Longitude, data.Location,
+	).Scan(
+		&ScanClient.SN, &ScanClient.ID, &ScanClient.CaseNumber, &ScanClient.Date, &ScanClient.Block, &ScanClient.IUCR, &ScanClient.PrimaryType,
+		&ScanClient.Description, &ScanClient.LocationDescription, &ScanClient.Arrest, &ScanClient.Domestic, &ScanClient.Beat, &ScanClient.District,
+		&ScanClient.Ward, &ScanClient.CommunityArea, &ScanClient.FBICode, &ScanClient.XCoordinate, &ScanClient.YCoordinate,
+		&ScanClient.Year, &ScanClient.UpdatedOn, &ScanClient.Latitude, &ScanClient.Longitude, &ScanClient.Location,
+	)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 }
